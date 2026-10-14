@@ -1,208 +1,45 @@
+// bot/index.js — بوت مقرأة الإمام الجزري (طالب + أدمن)، 3 لغات
 const { Telegraf, Markup } = require('telegraf');
 const { pool, config } = require('../src/config');
-const { getOrCreateWallet } = require('../src/services');
+const { getOrCreateWallet, creditMinutes } = require('../src/services');
+const { t, fmt, programName, pkgName } = require('./i18n');
 
-// ============================================================
-// الجلسات
-// ============================================================
+// ================== الجلسات في الذاكرة ==================
 const sessions = new Map();
 function getS(ctx) {
   const k = String(ctx.from?.id || '');
-  if (!k) return { step: null, lang: 'ar', data: {}, loaded: false };
-  if (!sessions.has(k)) sessions.set(k, { step: null, lang: 'ar', data: {}, loaded: false });
+  if (!k) return { step: null, lang: 'ar', data: {}, loaded: false, isAdmin: false };
+  if (!sessions.has(k)) {
+    sessions.set(k, { step: null, lang: 'ar', data: {}, loaded: false, isAdmin: false });
+  }
   return sessions.get(k);
 }
 
-// ============================================================
-// الترجمات — 3 لغات (ar / en / am)
-// القاعدة: المصطلحات الشرعية والقرآنية تبقى بلفظها العربي
-// ولا تُترجم إلى معناها؛ تُنقل صوتيًا (Transliteration).
-// ============================================================
-const T = {
-  ar: {
-    brand: '🕌 *مقرأة الإمام الجزري للإقراء والإجازة بالسند*',
-    supervisor: 'الشيخ المشرف: المقرئ أبو زيد خالد أحمد الإثيوبي',
-    pick_lang: '🌐 اختر اللغة / Choose language / ቋንቋ ይምረጡ',
-    lang_set: '✅ تم اختيار اللغة العربية.',
-    menu: '🏠 القائمة الرئيسية',
-    btn_register: '📝 التسجيل',
-    btn_account: '👤 حسابي',
-    btn_buy: '🛒 شراء الدقائق',
-    btn_sessions: '📅 الجلسات',
-    btn_library: '📖 المكتبة',
-    btn_support: '🆘 الدعم',
-    btn_lang: '🌐 اللغة',
-    btn_cancel: '❌ إلغاء',
-    reg_ask_name: '📝 أرسل الاسم الكامل:',
-    reg_ask_phone: '📞 أرسل رقم الهاتف:',
-    reg_ask_program: '🎓 اختر البرنامج:',
-    reg_done: '✅ تم التسجيل بنجاح.',
-    reg_exists: '✅ أنت مسجل مسبقاً.',
-    reg_cancelled: 'تم الإلغاء.',
-    acc_title: '👤 *حسابي*',
-    acc_name: 'الاسم',
-    acc_id: 'رقم الطالب',
-    acc_program: 'البرنامج',
-    acc_balance: 'رصيد الدقائق',
-    acc_not_registered: '⚠️ أنت غير مسجل. اختر «التسجيل» أولاً.',
-    buy_pick: '🛒 اختر حزمة الدقائق:',
-    buy_order_created: '✅ تم إنشاء طلب الشراء.',
-    buy_pay_info:
-      '💳 للدفع:\n• تيليبر: +251 99 016 1372\n• إم-بيسا: +251 72 100 9122\n\nثم أرسل الإيصال عبر «الدعم».',
-    sessions_empty: '📭 لا توجد جلسات قادمة.',
-    sessions_next: '📅 *جلساتك القادمة*',
-    lib_empty: '📚 المكتبة فارغة حالياً.',
-    lib_title: '📖 *المكتبة*',
-    support_msg:
-      '🆘 *الدعم الفني*\n\n📧 khdahd241@gmail.com\n📱 @aljezer_241\n📞 +251 99 016 1372',
-    myid: '🆔 معرفك على تيليغرام:',
-    unknown: '⚠️ أمر غير معروف. استخدم القائمة.',
-    error: '⚠️ حدث خطأ، حاول مجدداً.',
-    minutes: 'دقيقة',
-    etb: 'بر',
-  },
-  en: {
-    // تم استخدام النقل الصوتي للمصطلحات الشرعية
-    brand: '🕌 *Imam Al-Jazari Maqra\'ah for Ijazah with Sanad*',
-    supervisor: 'Supervisor: Sheikh Abu Zaid Khalid Ahmed Al-Ethiopi',
-    pick_lang: '🌐 Choose language / اختر اللغة / ቋንቋ ይምረጡ',
-    lang_set: '✅ English selected.',
-    menu: '🏠 Main Menu',
-    btn_register: '📝 Registration',
-    btn_account: '👤 My Account',
-    btn_buy: '🛒 Buy Minutes',
-    btn_sessions: '📅 Sessions',
-    btn_library: '📖 Library',
-    btn_support: '🆘 Support',
-    btn_lang: '🌐 Language',
-    btn_cancel: '❌ Cancel',
-    reg_ask_name: '📝 Send your full name:',
-    reg_ask_phone: '📞 Send your phone number:',
-    reg_ask_program: '🎓 Choose a program:',
-    reg_done: '✅ Registration complete.',
-    reg_exists: '✅ You are already registered.',
-    reg_cancelled: 'Cancelled.',
-    acc_title: '👤 *My Account*',
-    acc_name: 'Name',
-    acc_id: 'Student No.',
-    acc_program: 'Program',
-    acc_balance: 'Minutes balance',
-    acc_not_registered: '⚠️ Not registered yet. Choose "Registration" first.',
-    buy_pick: '🛒 Choose a minutes pack:',
-    buy_order_created: '✅ Purchase order created.',
-    buy_pay_info:
-      '💳 Payment:\n• Telebirr: +251 99 016 1372\n• M-Pesa: +251 72 100 9122\n\nSend the receipt via "Support".',
-    sessions_empty: '📭 No upcoming sessions.',
-    sessions_next: '📅 *Your upcoming sessions*',
-    lib_empty: '📚 Library is empty.',
-    lib_title: '📖 *Library*',
-    support_msg:
-      '🆘 *Support*\n\n📧 khdahd241@gmail.com\n📱 @aljezer_241\n📞 +251 99 016 1372',
-    myid: '🆔 Your Telegram ID:',
-    unknown: '⚠️ Unknown command. Use the menu.',
-    error: '⚠️ Something went wrong. Try again.',
-    minutes: 'min',
-    etb: 'ETB',
-  },
-  am: {
-    // تم استخدام النقل الصوتي للمصطلحات الشرعية بحروف أمهرية
-    brand: '🕌 *የኢማም አል-ጀዛሪ መቅራአ — ለኢጃዛ በሰነድ*',
-    supervisor: 'ሱፐርቫይዘር: ሼኽ አቡ ዛይድ ኻሊድ አህመድ አል-ኢትዮጵያዊ',
-    pick_lang: '🌐 ቋንቋ ይምረጡ / اختر اللغة / Choose language',
-    lang_set: '✅ አማርኛ ተመርጧል።',
-    menu: '🏠 ዋና ማውጫ',
-    btn_register: '📝 ምዝገባ',
-    btn_account: '👤 ሒሳቤ',
-    btn_buy: '🛒 ደቂቃ ግዛ',
-    btn_sessions: '📅 ክፍለ ጊዜ',
-    btn_library: '📖 ቤተ መጻሕፍት',
-    btn_support: '🆘 ድጋፍ',
-    btn_lang: '🌐 ቋንቋ',
-    btn_cancel: '❌ ሰርዝ',
-    reg_ask_name: '📝 ሙሉ ስምዎን ይላኩ:',
-    reg_ask_phone: '📞 ስልክ ቁጥርዎን ይላኩ:',
-    reg_ask_program: '🎓 ፕሮግራም ይምረጡ:',
-    reg_done: '✅ ምዝገባው ተጠናቅቋል።',
-    reg_exists: '✅ አስቀድመው ተመዝግበዋል።',
-    reg_cancelled: 'ተሰርዟል።',
-    acc_title: '👤 *ሒሳቤ*',
-    acc_name: 'ስም',
-    acc_id: 'የተማሪ ቁጥር',
-    acc_program: 'ፕሮግራም',
-    acc_balance: 'የደቂቃ ቀሪ',
-    acc_not_registered: '⚠️ አልተመዘገቡም። መጀመሪያ «ምዝገባ» ይምረጡ።',
-    buy_pick: '🛒 የደቂቃ ጥቅል ይምረጡ:',
-    buy_order_created: '✅ የግዢ ትዕዛዝ ተፈጥሯል።',
-    buy_pay_info:
-      '💳 ክፍያ:\n• ቴሌብር: +251 99 016 1372\n• ኤም-ፔሳ: +251 72 100 9122\n\nደረሰኙን በ«ድጋፍ» ይላኩ።',
-    sessions_empty: '📭 የሚመጡ ክፍለ ጊዜዎች የሉም።',
-    sessions_next: '📅 *የሚመጡ ክፍለ ጊዜዎች*',
-    lib_empty: '📚 ቤተ መጻሕፍቱ ባዶ ነው።',
-    lib_title: '📖 *ቤተ መጻሕፍት*',
-    support_msg:
-      '🆘 *ድጋፍ*\n\n📧 khdahd241@gmail.com\n📱 @aljezer_241\n📞 +251 99 016 1372',
-    myid: '🆔 የቴሌግራም መታወቂያዎ:',
-    unknown: '⚠️ ያልታወቀ ትዕዛዝ። ማውጫውን ይጠቀሙ።',
-    error: '⚠️ ስህተት ተከስቷል። እንደገና ይሞክሩ።',
-    minutes: 'ደቂቃ',
-    etb: 'ብር',
-  },
-};
-
-function t(lang, key) {
-  const d = T[lang] || T.ar;
-  return d[key] ?? T.ar[key] ?? key;
-}
-
-// أسماء البرامج: تُعرض بالحروف الأصلية للمصطلح الشرعي في كل لغة
-function programName(p, lang) {
-  if (!p) return '—';
-  if (lang === 'en') return p.name_en || p.name_ar;
-  if (lang === 'am') return p.name_am || p.name_ar;
-  return p.name_ar;
-}
-
-function pkgName(p, lang) {
-  if (!p) return '—';
-  if (lang === 'en') return p.name_en || p.name_ar;
-  return p.name_ar;
-}
-
-function menuKb(lang) {
-  return Markup.keyboard([
-    [t(lang, 'btn_register'), t(lang, 'btn_account')],
-    [t(lang, 'btn_buy'), t(lang, 'btn_sessions')],
-    [t(lang, 'btn_library'), t(lang, 'btn_support')],
-    [t(lang, 'btn_lang')],
-  ])
-    .resize()
-    .persistent();
-}
-
-function cancelKb(lang) {
-  return Markup.keyboard([[t(lang, 'btn_cancel')]]).resize();
-}
-
-function langKb() {
-  return Markup.inlineKeyboard([
-    [
-      Markup.button.callback('🇸🇦 العربية', 'lang:ar'),
-      Markup.button.callback('🇬🇧 English', 'lang:en'),
-      Markup.button.callback('🇪🇹 አማርኛ', 'lang:am'),
-    ],
-  ]);
-}
-
-// ============================================================
-// الدوال المساعدة لقاعدة البيانات
-// ============================================================
-async function loadUserLang(telegramId) {
-  const r = await pool.query('SELECT language FROM users WHERE telegram_id = $1', [telegramId]);
-  return r.rows[0]?.language || null;
-}
-
+// ================== أدوات قاعدة البيانات ==================
 async function findUser(telegramId) {
   const r = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [telegramId]);
+  return r.rows[0] || null;
+}
+
+async function findUserByStudentId(studentNo) {
+  // studentNo = أول 8 حروف من UUID (نستخدمها كمعرّف مقروء)
+  const r = await pool.query(
+    `SELECT * FROM users
+      WHERE UPPER(SUBSTRING(id::text, 1, 8)) = UPPER($1)
+      LIMIT 1`,
+    [studentNo]
+  );
+  return r.rows[0] || null;
+}
+
+async function findUserFlexible(input) {
+  // يقبل: UUID كامل، أول 8 حروف، أو Telegram ID رقمي
+  if (/^\d+$/.test(input)) {
+    return findUser(parseInt(input, 10));
+  }
+  const u = await findUserByStudentId(input);
+  if (u) return u;
+  const r = await pool.query('SELECT * FROM users WHERE id::text = $1 LIMIT 1', [input]);
   return r.rows[0] || null;
 }
 
@@ -220,59 +57,106 @@ async function getPackages() {
   return r.rows;
 }
 
-// ============================================================
-// البوت
-// ============================================================
-async function startBot() {
-  const bot = new Telegraf(config.botToken);
+async function getAllAdmins() {
+  const r = await pool.query(
+    `SELECT id, telegram_id FROM users
+      WHERE role IN ('admin','teacher') AND telegram_id IS NOT NULL`
+  );
+  return r.rows;
+}
 
-  // تحميل لغة المستخدم من قاعدة البيانات لأول تفاعل
+// ================== لوحات المفاتيح ==================
+function studentMenu(lang, isAdmin) {
+  const rows = [
+    [t(lang, 'btn_register'), t(lang, 'btn_account')],
+    [t(lang, 'btn_buy'), t(lang, 'btn_send_receipt')],
+    [t(lang, 'btn_sessions'), t(lang, 'btn_library')],
+    [t(lang, 'btn_support'), t(lang, 'btn_lang')],
+  ];
+  if (isAdmin) rows.push([t(lang, 'btn_admin')]);
+  return Markup.keyboard(rows).resize().persistent();
+}
+
+function adminMenu(lang) {
+  return Markup.keyboard([
+    [t(lang, 'admin_pending'), t(lang, 'admin_students')],
+    [t(lang, 'admin_add_minutes'), t(lang, 'admin_ijaza')],
+    [t(lang, 'admin_broadcast'), t(lang, 'admin_stats')],
+    [t(lang, 'btn_back')],
+  ])
+    .resize()
+    .persistent();
+}
+
+function cancelKb(lang) {
+  return Markup.keyboard([[t(lang, 'btn_cancel')]]).resize();
+}
+
+function backKb(lang) {
+  return Markup.keyboard([[t(lang, 'btn_back')]]).resize();
+}
+
+function langKb() {
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.callback('🇸🇦 العربية', 'lang:ar'),
+      Markup.button.callback('🇬🇧 English', 'lang:en'),
+      Markup.button.callback('🇪🇹 አማርኛ', 'lang:am'),
+    ],
+  ]);
+}
+
+// ================== إشعار جميع الأدمن ==================
+async function notifyAdmins(text, extra) {
+  const admins = await getAllAdmins();
+  for (const a of admins) {
+    try {
+      await bot.telegram.sendMessage(a.telegram_id, text, extra || {});
+    } catch (_) {}
+  }
+}
+
+// ================== البوت ==================
+let bot;
+
+async function startBot() {
+  bot = new Telegraf(config.botToken);
+
+  // تحميل اللغة والصلاحية عند أول تفاعل
   bot.use(async (ctx, next) => {
     const s = getS(ctx);
     if (!s.loaded && ctx.from) {
       try {
-        const lang = await loadUserLang(ctx.from.id);
-        if (lang && T[lang]) s.lang = lang;
+        const u = await findUser(ctx.from.id);
+        if (u) {
+          s.lang = u.language || s.lang || 'ar';
+          s.isAdmin = u.role === 'admin' || u.role === 'teacher';
+        }
       } catch (_) {}
       s.loaded = true;
     }
     return next();
   });
 
-  // ---------- /start ----------
+  // ============================================================
+  // أوامر عامة
+  // ============================================================
   bot.start(async (ctx) => {
     const s = getS(ctx);
     const u = await findUser(ctx.from.id);
     if (u) {
       s.lang = u.language || s.lang || 'ar';
+      s.isAdmin = u.role === 'admin' || u.role === 'teacher';
       await ctx.reply(
         `${t(s.lang, 'brand')}\n${t(s.lang, 'supervisor')}\n\n${t(s.lang, 'menu')}`,
-        { parse_mode: 'Markdown', ...menuKb(s.lang) }
+        { parse_mode: 'Markdown', ...studentMenu(s.lang, s.isAdmin) }
       );
       return;
     }
-    // مستخدم جديد → اختيار اللغة
-    await ctx.reply(
-      `${T.ar.brand}\n${T.ar.supervisor}\n\n${T.ar.pick_lang}`,
-      { parse_mode: 'Markdown', ...langKb() }
-    );
-  });
-
-  // ---------- تغيير اللغة ----------
-  bot.action(/^lang:(ar|en|am)$/, async (ctx) => {
-    const lang = ctx.match[1];
-    const s = getS(ctx);
-    s.lang = lang;
-    try { await ctx.answerCbQuery(); } catch (_) {}
-    try { await ctx.deleteMessage(); } catch (_) {}
-    // حفظها في قاعدة البيانات إن كان المستخدم مسجلاً
-    try {
-      await pool.query(
-        'UPDATE users SET language = $1, updated_at = NOW() WHERE telegram_id = $2',
-        [lang, ctx.from.id]
-      );
-    } catch (_) {}
-    await ctx.reply(t(lang, 'lang_set'), menuKb(lang));
+    await ctx.reply(`${t('ar', 'brand')}\n${t('ar', 'supervisor')}\n\n${t('ar', 'pick_lang')}`, {
+      parse_mode: 'Markdown',
+      ...langKb(),
+    });
   });
 
   bot.command('lang', async (ctx) => {
@@ -287,11 +171,41 @@ async function startBot() {
 
   bot.command('cancel', async (ctx) => {
     const s = getS(ctx);
-    s.step = null; s.data = {};
-    await ctx.reply(t(s.lang, 'reg_cancelled'), menuKb(s.lang));
+    s.step = null;
+    s.data = {};
+    await ctx.reply(t(s.lang, 'reg_cancelled'), studentMenu(s.lang, s.isAdmin));
   });
 
-  // ---------- اختيار البرنامج أثناء التسجيل ----------
+  bot.command('admin', async (ctx) => {
+    const s = getS(ctx);
+    if (!s.isAdmin) return ctx.reply(t(s.lang, 'admin_only'));
+    await ctx.reply(t(s.lang, 'admin_title'), {
+      parse_mode: 'Markdown',
+      ...adminMenu(s.lang),
+    });
+  });
+
+  // ============================================================
+  // اختيار اللغة
+  // ============================================================
+  bot.action(/^lang:(ar|en|am)$/, async (ctx) => {
+    const lang = ctx.match[1];
+    const s = getS(ctx);
+    s.lang = lang;
+    try { await ctx.answerCbQuery(); } catch (_) {}
+    try { await ctx.deleteMessage(); } catch (_) {}
+    try {
+      await pool.query(
+        'UPDATE users SET language = $1, updated_at = NOW() WHERE telegram_id = $2',
+        [lang, ctx.from.id]
+      );
+    } catch (_) {}
+    await ctx.reply(t(lang, 'lang_set'), studentMenu(lang, s.isAdmin));
+  });
+
+  // ============================================================
+  // تسجيل: اختيار البرنامج
+  // ============================================================
   bot.action(/^prog:(\d+)$/, async (ctx) => {
     const programId = parseInt(ctx.match[1], 10);
     const s = getS(ctx);
@@ -302,14 +216,12 @@ async function startBot() {
       const u = await findUser(ctx.from.id);
       if (u) {
         s.step = null; s.data = {};
-        await ctx.reply(t(lang, 'reg_exists'), menuKb(lang));
-        return;
+        return ctx.reply(t(lang, 'reg_exists'), studentMenu(lang, s.isAdmin));
       }
       const { full_name, phone } = s.data || {};
       if (!full_name || !phone) {
         s.step = null; s.data = {};
-        await ctx.reply(t(lang, 'unknown'), menuKb(lang));
-        return;
+        return ctx.reply(t(lang, 'unknown'), studentMenu(lang, s.isAdmin));
       }
       const ins = await pool.query(
         `INSERT INTO users (full_name, phone, role, language, telegram_id, telegram_username)
@@ -329,10 +241,11 @@ async function startBot() {
         [userId, ctx.from.id, full_name, phone, programId, lang]
       );
       s.step = null; s.data = {};
-      await ctx.reply(t(lang, 'reg_done'), menuKb(lang));
+      await ctx.reply(t(lang, 'reg_done'), studentMenu(lang, s.isAdmin));
+      await notifyAdmins(`🆕 تسجيل جديد:\n${full_name}\n📞 ${phone}`);
     } catch (err) {
       console.error('[reg]', err.message);
-      await ctx.reply(t(lang, 'error'), menuKb(lang));
+      await ctx.reply(t(lang, 'error'), studentMenu(lang, s.isAdmin));
     }
   });
 
@@ -341,10 +254,12 @@ async function startBot() {
     try { await ctx.answerCbQuery(); } catch (_) {}
     try { await ctx.deleteMessage(); } catch (_) {}
     s.step = null; s.data = {};
-    await ctx.reply(t(s.lang, 'reg_cancelled'), menuKb(s.lang));
+    await ctx.reply(t(s.lang, 'reg_cancelled'), studentMenu(s.lang, s.isAdmin));
   });
 
-  // ---------- اختيار الحزمة ----------
+  // ============================================================
+  // شراء: اختيار حزمة
+  // ============================================================
   bot.action(/^pkg:(\d+)$/, async (ctx) => {
     const pkgId = parseInt(ctx.match[1], 10);
     const s = getS(ctx);
@@ -354,51 +269,242 @@ async function startBot() {
     try {
       const u = await findUser(ctx.from.id);
       if (!u) {
-        await ctx.reply(t(lang, 'acc_not_registered'), menuKb(lang));
-        return;
+        return ctx.reply(t(lang, 'acc_not_registered'), studentMenu(lang, s.isAdmin));
       }
       const p = await pool.query('SELECT * FROM packages WHERE id = $1', [pkgId]);
-      if (!p.rows[0]) {
-        await ctx.reply(t(lang, 'error'), menuKb(lang));
-        return;
-      }
+      if (!p.rows[0]) return ctx.reply(t(lang, 'error'), studentMenu(lang, s.isAdmin));
       const pkg = p.rows[0];
-      await pool.query(
+      const order = await pool.query(
         `INSERT INTO payment_orders (user_id, package_id, amount_etb, status)
-         VALUES ($1,$2,$3,'pending')`,
+         VALUES ($1,$2,$3,'pending') RETURNING id`,
         [u.id, pkgId, pkg.price_etb]
       );
+      s.data.pendingOrderId = order.rows[0].id;
       await ctx.reply(
         `${t(lang, 'buy_order_created')}\n\n${t(lang, 'buy_pay_info')}`,
-        menuKb(lang)
+        studentMenu(lang, s.isAdmin)
       );
     } catch (err) {
       console.error('[buy]', err.message);
-      await ctx.reply(t(lang, 'error'), menuKb(lang));
+      await ctx.reply(t(lang, 'error'), studentMenu(lang, s.isAdmin));
     }
   });
 
-  // ---------- الرسائل النصية ----------
+  // ============================================================
+  // أدمن: قبول/رفض إيصال
+  // ============================================================
+  bot.action(/^rcpt:(view|approve|reject):([0-9a-f-]+)$/i, async (ctx) => {
+    const action = ctx.match[1];
+    const receiptId = ctx.match[2];
+    const s = getS(ctx);
+    const lang = s.lang;
+    if (!s.isAdmin) {
+      try { await ctx.answerCbQuery(t(lang, 'admin_only')); } catch (_) {}
+      return;
+    }
+
+    try {
+      const r = await pool.query(
+        `SELECT pr.id, pr.order_id, pr.file_url, pr.status,
+                po.amount_etb, po.package_id,
+                u.id AS user_id, u.full_name, u.telegram_id, u.language AS user_lang,
+                pk.minutes, pk.name_ar AS pkg_ar, pk.name_en AS pkg_en
+           FROM payment_receipts pr
+           JOIN payment_orders po ON po.id = pr.order_id
+           JOIN users u ON u.id = po.user_id
+           LEFT JOIN packages pk ON pk.id = po.package_id
+          WHERE pr.id = $1`,
+        [receiptId]
+      );
+      const row = r.rows[0];
+      if (!row) {
+        try { await ctx.answerCbQuery('not_found'); } catch (_) {}
+        return;
+      }
+
+      if (action === 'view') {
+        try { await ctx.answerCbQuery(); } catch (_) {}
+        const info = fmt(t(lang, 'order_line'), {
+          order: receiptId.slice(0, 8),
+          name: row.full_name || '—',
+          pkg: pkgName({ name_ar: row.pkg_ar, name_en: row.pkg_en }, lang),
+          etb: row.amount_etb,
+        });
+        const kb = Markup.inlineKeyboard([
+          [
+            Markup.button.callback(t(lang, 'admin_approve'), `rcpt:approve:${receiptId}`),
+            Markup.button.callback(t(lang, 'admin_reject'), `rcpt:reject:${receiptId}`),
+          ],
+        ]);
+        if (row.file_url) {
+          try {
+            await ctx.replyWithPhoto(row.file_url, { caption: info, ...kb });
+          } catch {
+            await ctx.reply(`${info}\n\n📎 ${row.file_url}`, kb);
+          }
+        } else {
+          await ctx.reply(info, kb);
+        }
+        return;
+      }
+
+      if (action === 'approve') {
+        if (row.status === 'approved') {
+          try { await ctx.answerCbQuery('already_approved'); } catch (_) {}
+          return;
+        }
+        const minutes = row.minutes || 0;
+        if (minutes > 0) {
+          await creditMinutes(row.user_id, minutes, {
+            refType: 'payment_receipt',
+            refId: receiptId,
+            note: 'شحن دقائق بعد قبول الإيصال',
+          });
+        }
+        await pool.query(
+          `UPDATE payment_receipts SET status='approved', reviewed_by=$1 WHERE id=$2`,
+          [ctx.from.id ? null : null, receiptId]
+        );
+        await pool.query(`UPDATE payment_orders SET status='paid' WHERE id=$1`, [row.order_id]);
+        try { await ctx.answerCbQuery('✅'); } catch (_) {}
+        try { await ctx.editMessageCaption(t(lang, 'admin_receipt_approved')); } catch (_) {
+          try { await ctx.editMessageText(t(lang, 'admin_receipt_approved')); } catch (_) {}
+        }
+        if (row.telegram_id) {
+          const ulang = row.user_lang || 'ar';
+          try {
+            await bot.telegram.sendMessage(
+              row.telegram_id,
+              `✅ +${minutes} ${t(ulang, 'minutes')}`
+            );
+          } catch (_) {}
+        }
+        return;
+      }
+
+      if (action === 'reject') {
+        await pool.query(
+          `UPDATE payment_receipts SET status='rejected', reviewed_by=$1 WHERE id=$2`,
+          [null, receiptId]
+        );
+        await pool.query(`UPDATE payment_orders SET status='rejected' WHERE id=$1`, [row.order_id]);
+        try { await ctx.answerCbQuery('❌'); } catch (_) {}
+        try { await ctx.editMessageCaption(t(lang, 'admin_receipt_rejected')); } catch (_) {
+          try { await ctx.editMessageText(t(lang, 'admin_receipt_rejected')); } catch (_) {}
+        }
+        if (row.telegram_id) {
+          const ulang = row.user_lang || 'ar';
+          try {
+            await bot.telegram.sendMessage(row.telegram_id, t(ulang, 'admin_receipt_rejected'));
+          } catch (_) {}
+        }
+        return;
+      }
+    } catch (err) {
+      console.error('[rcpt]', err.message);
+      try { await ctx.answerCbQuery('error'); } catch (_) {}
+    }
+  });
+
+  // ============================================================
+  // استقبال الصور/المستندات (إيصال أو رسالة دعم)
+  // ============================================================
+  bot.on(['photo', 'document'], async (ctx) => {
+    const s = getS(ctx);
+    const lang = s.lang;
+    try {
+      const u = await findUser(ctx.from.id);
+      if (!u) {
+        return ctx.reply(t(lang, 'acc_not_registered'), studentMenu(lang, s.isAdmin));
+      }
+
+      let fileId = null;
+      if (ctx.message.photo && ctx.message.photo.length) {
+        fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+      } else if (ctx.message.document) {
+        fileId = ctx.message.document.file_id;
+      }
+      if (!fileId) return;
+
+      // آخر طلب معلق
+      const order = await pool.query(
+        `SELECT id FROM payment_orders
+          WHERE user_id = $1 AND status = 'pending'
+          ORDER BY created_at DESC LIMIT 1`,
+        [u.id]
+      );
+      if (!order.rows[0]) {
+        return ctx.reply(t(lang, 'no_pending_order'), studentMenu(lang, s.isAdmin));
+      }
+      const orderId = order.rows[0].id;
+
+      const ins = await pool.query(
+        `INSERT INTO payment_receipts (order_id, file_url, status)
+         VALUES ($1,$2,'pending') RETURNING id`,
+        [orderId, fileId]
+      );
+      const receiptId = ins.rows[0].id;
+
+      await ctx.reply(t(lang, 'receipt_received'), studentMenu(lang, s.isAdmin));
+
+      // إشعار الأدمن
+      const admins = await getAllAdmins();
+      const pkg = await pool.query(
+        `SELECT pk.name_ar, pk.name_en, pk.minutes, po.amount_etb
+           FROM payment_orders po
+           LEFT JOIN packages pk ON pk.id = po.package_id
+          WHERE po.id = $1`,
+        [orderId]
+      );
+      const info = fmt(t('ar', 'order_line'), {
+        order: String(receiptId).slice(0, 8),
+        name: u.full_name || '—',
+        pkg: (pkg.rows[0] && (pkg.rows[0].name_ar || pkg.rows[0].name_en)) || '—',
+        etb: (pkg.rows[0] && pkg.rows[0].amount_etb) || '—',
+      });
+      const kb = Markup.inlineKeyboard([
+        [
+          Markup.button.callback(t('ar', 'admin_approve'), `rcpt:approve:${receiptId}`),
+          Markup.button.callback(t('ar', 'admin_reject'), `rcpt:reject:${receiptId}`),
+        ],
+      ]);
+      for (const a of admins) {
+        try {
+          await bot.telegram.sendPhoto(a.telegram_id, fileId, { caption: info, ...kb });
+        } catch (_) {}
+      }
+    } catch (err) {
+      console.error('[receipt]', err.message);
+      await ctx.reply(t(lang, 'error'), studentMenu(lang, s.isAdmin));
+    }
+  });
+
+  // ============================================================
+  // الرسائل النصية (طالب + أدمن)
+  // ============================================================
   bot.on('text', async (ctx) => {
     const s = getS(ctx);
     const lang = s.lang;
-    const text = ctx.message.text.trim();
+    const text = (ctx.message.text || '').trim();
 
-    // إلغاء
+    // إلغاء عالمي
     if (text === t(lang, 'btn_cancel')) {
       s.step = null; s.data = {};
-      await ctx.reply(t(lang, 'reg_cancelled'), menuKb(lang));
-      return;
+      return ctx.reply(t(lang, 'reg_cancelled'), studentMenu(lang, s.isAdmin));
     }
 
-    // خطوة اسم التسجيل
+    // رجوع
+    if (text === t(lang, 'btn_back')) {
+      s.step = null; s.data = {};
+      return ctx.reply(t(lang, 'back_to_menu'), studentMenu(lang, s.isAdmin));
+    }
+
+    // =========== خطوات التسجيل ===========
     if (s.step === 'reg_name') {
       s.data.full_name = text;
       s.step = 'reg_phone';
-      await ctx.reply(t(lang, 'reg_ask_phone'), cancelKb(lang));
-      return;
+      return ctx.reply(t(lang, 'reg_ask_phone'), cancelKb(lang));
     }
-    // خطوة الهاتف
     if (s.step === 'reg_phone') {
       s.data.phone = text;
       s.step = 'reg_program';
@@ -407,68 +513,287 @@ async function startBot() {
         Markup.button.callback(programName(p, lang), `prog:${p.id}`),
       ]);
       rows.push([Markup.button.callback(t(lang, 'btn_cancel'), 'cancel')]);
-      await ctx.reply(t(lang, 'reg_ask_program'), Markup.inlineKeyboard(rows));
+      return ctx.reply(t(lang, 'reg_ask_program'), Markup.inlineKeyboard(rows));
+    }
+
+    // =========== خطوات الأدمن ===========
+    if (s.isAdmin && s.step) {
+      if (s.step === 'adm_add_min_id') {
+        const target = await findUserFlexible(text);
+        if (!target) {
+          s.step = null;
+          return ctx.reply(t(lang, 'admin_student_not_found'), adminMenu(lang));
+        }
+        s.data.targetUserId = target.id;
+        s.data.targetName = target.full_name;
+        s.step = 'adm_add_min_amount';
+        return ctx.reply(
+          `${t(lang, 'admin_student_found')}: ${target.full_name}\n\n${t(lang, 'admin_ask_minutes')}`,
+          backKb(lang)
+        );
+      }
+      if (s.step === 'adm_add_min_amount') {
+        const n = parseInt(text, 10);
+        if (!Number.isFinite(n) || n <= 0) return ctx.reply(t(lang, 'error'));
+        s.data.minutes = n;
+        s.step = 'adm_add_min_reason';
+        return ctx.reply(t(lang, 'admin_ask_reason'), backKb(lang));
+      }
+      if (s.step === 'adm_add_min_reason') {
+        const reason = text === '-' ? null : text;
+        try {
+          await creditMinutes(s.data.targetUserId, s.data.minutes, {
+            refType: 'admin_manual',
+            refId: String(ctx.from.id),
+            note: reason,
+          });
+          await ctx.reply(t(lang, 'admin_minutes_added'), adminMenu(lang));
+          const u = await pool.query('SELECT telegram_id, language FROM users WHERE id=$1', [
+            s.data.targetUserId,
+          ]);
+          if (u.rows[0]?.telegram_id) {
+            const ul = u.rows[0].language || 'ar';
+            try {
+              await bot.telegram.sendMessage(
+                u.rows[0].telegram_id,
+                `✅ +${s.data.minutes} ${t(ul, 'minutes')}`
+              );
+            } catch (_) {}
+          }
+        } catch (e) {
+          console.error('[admin.add]', e.message);
+          await ctx.reply(t(lang, 'error'), adminMenu(lang));
+        }
+        s.step = null; s.data = {};
+        return;
+      }
+      if (s.step === 'adm_broadcast') {
+        s.step = null;
+        try {
+          const users = await pool.query(
+            'SELECT telegram_id FROM users WHERE telegram_id IS NOT NULL'
+          );
+          let n = 0;
+          for (const u of users.rows) {
+            try {
+              await bot.telegram.sendMessage(u.telegram_id, text);
+              n++;
+            } catch (_) {}
+          }
+          return ctx.reply(fmt(t(lang, 'admin_broadcast_done'), { n }), adminMenu(lang));
+        } catch (e) {
+          return ctx.reply(t(lang, 'error'), adminMenu(lang));
+        }
+      }
+      if (s.step === 'adm_ijaza_student') {
+        const target = await findUserFlexible(text);
+        if (!target) {
+          s.step = null;
+          return ctx.reply(t(lang, 'admin_student_not_found'), adminMenu(lang));
+        }
+        s.data.ijazaUserId = target.id;
+        s.step = 'adm_ijaza_teacher';
+        return ctx.reply(t(lang, 'ijaza_ask_teacher'), backKb(lang));
+      }
+      if (s.step === 'adm_ijaza_teacher') {
+        s.data.ijazaTeacher = text;
+        s.step = 'adm_ijaza_sanad';
+        return ctx.reply(t(lang, 'ijaza_ask_sanad'), backKb(lang));
+      }
+      if (s.step === 'adm_ijaza_sanad') {
+        try {
+          const serial = 'IJZ-' + Date.now().toString(36).toUpperCase();
+          await pool.query(
+            `INSERT INTO ijazat (user_id, teacher_name, sanad_text, serial)
+             VALUES ($1,$2,$3,$4)`,
+            [s.data.ijazaUserId, s.data.ijazaTeacher, text, serial]
+          );
+          await ctx.reply(`${t(lang, 'ijaza_done')} (${serial})`, adminMenu(lang));
+          const u = await pool.query('SELECT telegram_id, language FROM users WHERE id=$1', [
+            s.data.ijazaUserId,
+          ]);
+          if (u.rows[0]?.telegram_id) {
+            const ul = u.rows[0].language || 'ar';
+            try {
+              await bot.telegram.sendMessage(
+                u.rows[0].telegram_id,
+                `🎓 Ijazah: ${serial}\n${t(ul, 'ijaza_done')}`
+              );
+            } catch (_) {}
+          }
+        } catch (e) {
+          console.error('[admin.ijaza]', e.message);
+          await ctx.reply(t(lang, 'error'), adminMenu(lang));
+        }
+        s.step = null; s.data = {};
+        return;
+      }
+    }
+
+    // =========== رسالة دعم أثناء خطوة support ===========
+    if (s.step === 'support') {
+      s.step = null;
+      try {
+        const u = await findUser(ctx.from.id);
+        if (u) {
+          const t1 = await pool.query(
+            `INSERT INTO support_tickets (user_id, subject, status)
+             VALUES ($1,'bot_message','open') RETURNING id`,
+            [u.id]
+          );
+          await pool.query(
+            `INSERT INTO support_messages (ticket_id, sender_id, body)
+             VALUES ($1,$2,$3)`,
+            [t1.rows[0].id, u.id, text]
+          );
+        }
+        await ctx.reply(t(lang, 'support_sent'), studentMenu(lang, s.isAdmin));
+        await notifyAdmins(`🆘 Support:\n${u?.full_name || ''}\n${text}`);
+      } catch (e) {
+        await ctx.reply(t(lang, 'error'), studentMenu(lang, s.isAdmin));
+      }
       return;
     }
 
-    // القائمة الرئيسية
+    // =========== زر لوحة الأدمن ===========
+    if (text === t(lang, 'btn_admin') || text === t(lang, 'admin_menu')) {
+      if (!s.isAdmin) return ctx.reply(t(lang, 'admin_only'));
+      return ctx.reply(t(lang, 'admin_title'), {
+        parse_mode: 'Markdown',
+        ...adminMenu(lang),
+      });
+    }
+
+    // =========== أزرار الأدمن ===========
+    if (s.isAdmin && text === t(lang, 'admin_pending')) {
+      const r = await pool.query(
+        `SELECT pr.id, pr.status, po.amount_etb,
+                u.full_name,
+                pk.name_ar AS pkg_ar, pk.name_en AS pkg_en
+           FROM payment_receipts pr
+           JOIN payment_orders po ON po.id = pr.order_id
+           JOIN users u ON u.id = po.user_id
+           LEFT JOIN packages pk ON pk.id = po.package_id
+          WHERE pr.status = 'pending'
+          ORDER BY pr.created_at DESC LIMIT 20`
+      );
+      if (!r.rows.length) {
+        return ctx.reply(t(lang, 'admin_no_pending'), adminMenu(lang));
+      }
+      for (const row of r.rows) {
+        const info = fmt(t(lang, 'order_line'), {
+          order: String(row.id).slice(0, 8),
+          name: row.full_name || '—',
+          pkg: pkgName({ name_ar: row.pkg_ar, name_en: row.pkg_en }, lang),
+          etb: row.amount_etb,
+        });
+        const kb = Markup.inlineKeyboard([
+          [
+            Markup.button.callback(t(lang, 'admin_approve'), `rcpt:approve:${row.id}`),
+            Markup.button.callback(t(lang, 'admin_reject'), `rcpt:reject:${row.id}`),
+          ],
+        ]);
+        await ctx.reply(info, kb);
+      }
+      return;
+    }
+
+    if (s.isAdmin && text === t(lang, 'admin_students')) {
+      const r = await pool.query(
+        `SELECT id, full_name, phone, language, created_at
+           FROM users WHERE role='student'
+           ORDER BY created_at DESC LIMIT 20`
+      );
+      if (!r.rows.length) return ctx.reply('—', adminMenu(lang));
+      const lines = r.rows.map(
+        (u, i) =>
+          `${i + 1}. ${u.full_name || '—'} | ${u.phone || '—'} | ${
+            String(u.id).slice(0, 8).toUpperCase()
+          }`
+      );
+      return ctx.reply(`👥 Students (${r.rows.length}):\n\n${lines.join('\n')}`, adminMenu(lang));
+    }
+
+    if (s.isAdmin && text === t(lang, 'admin_add_minutes')) {
+      s.step = 'adm_add_min_id';
+      s.data = {};
+      return ctx.reply(t(lang, 'admin_ask_student_id'), cancelKb(lang));
+    }
+
+    if (s.isAdmin && text === t(lang, 'admin_broadcast')) {
+      s.step = 'adm_broadcast';
+      return ctx.reply(t(lang, 'admin_broadcast_ask'), cancelKb(lang));
+    }
+
+    if (s.isAdmin && text === t(lang, 'admin_ijaza')) {
+      s.step = 'adm_ijaza_student';
+      s.data = {};
+      return ctx.reply(t(lang, 'ijaza_ask_student'), cancelKb(lang));
+    }
+
+    if (s.isAdmin && text === t(lang, 'admin_stats')) {
+      const [st, rc, se, ij] = await Promise.all([
+        pool.query(`SELECT COUNT(*)::int AS n FROM users WHERE role='student'`),
+        pool.query(`SELECT COUNT(*)::int AS n FROM payment_receipts WHERE status='pending'`),
+        pool.query(`SELECT COUNT(*)::int AS n FROM bookings WHERE scheduled_at > NOW()`),
+        pool.query(`SELECT COUNT(*)::int AS n FROM ijazat`),
+      ]);
+      return ctx.reply(
+        fmt(t(lang, 'admin_stats_txt'), {
+          students: st.rows[0].n,
+          receipts: rc.rows[0].n,
+          sessions: se.rows[0].n,
+          ijazat: ij.rows[0].n,
+        }),
+        { parse_mode: 'Markdown', ...adminMenu(lang) }
+      );
+    }
+
+    // =========== أزرار الطالب ===========
     if (text === t(lang, 'btn_register')) {
       const u = await findUser(ctx.from.id);
-      if (u) {
-        await ctx.reply(t(lang, 'reg_exists'), menuKb(lang));
-        return;
-      }
+      if (u) return ctx.reply(t(lang, 'reg_exists'), studentMenu(lang, s.isAdmin));
       s.step = 'reg_name'; s.data = {};
-      await ctx.reply(t(lang, 'reg_ask_name'), cancelKb(lang));
-      return;
+      return ctx.reply(t(lang, 'reg_ask_name'), cancelKb(lang));
     }
 
     if (text === t(lang, 'btn_account')) {
       const u = await findUser(ctx.from.id);
-      if (!u) {
-        await ctx.reply(t(lang, 'acc_not_registered'), menuKb(lang));
-        return;
-      }
+      if (!u) return ctx.reply(t(lang, 'acc_not_registered'), studentMenu(lang, s.isAdmin));
       const r = await pool.query(
-        `SELECT u.full_name,
-                w.balance_minutes,
+        `SELECT u.full_name, w.balance_minutes,
                 p.name_ar, p.name_en, p.name_am
            FROM users u
            LEFT JOIN wallet_accounts w ON w.user_id = u.id
-           LEFT JOIN enrollments e ON e.user_id = u.id AND e.status = 'active'
+           LEFT JOIN enrollments e ON e.user_id = u.id AND e.status='active'
            LEFT JOIN programs p ON p.id = e.program_id
-          WHERE u.id = $1
-          LIMIT 1`,
+          WHERE u.id = $1 LIMIT 1`,
         [u.id]
       );
       const row = r.rows[0] || {};
-      const studentNo = String(u.id).slice(0, 8).toUpperCase();
       const prog = row.name_ar
-        ? programName({ name_ar: row.name_ar, name_en: row.name_en, name_am: row.name_am }, lang)
+        ? programName(
+            { name_ar: row.name_ar, name_en: row.name_en, name_am: row.name_am },
+            lang
+          )
         : '—';
       const bal = row.balance_minutes ?? 0;
       await ctx.reply(
         `${t(lang, 'acc_title')}\n\n` +
           `• ${t(lang, 'acc_name')}: ${row.full_name || u.full_name || '—'}\n` +
-          `• ${t(lang, 'acc_id')}: ${studentNo}\n` +
+          `• ${t(lang, 'acc_id')}: ${String(u.id).slice(0, 8).toUpperCase()}\n` +
           `• ${t(lang, 'acc_program')}: ${prog}\n` +
           `• ${t(lang, 'acc_balance')}: ${bal}`,
-        { parse_mode: 'Markdown', ...menuKb(lang) }
+        { parse_mode: 'Markdown', ...studentMenu(lang, s.isAdmin) }
       );
       return;
     }
 
     if (text === t(lang, 'btn_buy')) {
       const u = await findUser(ctx.from.id);
-      if (!u) {
-        await ctx.reply(t(lang, 'acc_not_registered'), menuKb(lang));
-        return;
-      }
+      if (!u) return ctx.reply(t(lang, 'acc_not_registered'), studentMenu(lang, s.isAdmin));
       const pkgs = await getPackages();
-      if (!pkgs.length) {
-        await ctx.reply(t(lang, 'error'), menuKb(lang));
-        return;
-      }
+      if (!pkgs.length) return ctx.reply(t(lang, 'error'), studentMenu(lang, s.isAdmin));
       const rows = pkgs.map((p) => [
         Markup.button.callback(
           `${pkgName(p, lang)} — ${p.minutes} ${t(lang, 'minutes')} — ${p.price_etb} ${t(lang, 'etb')}`,
@@ -476,65 +801,66 @@ async function startBot() {
         ),
       ]);
       rows.push([Markup.button.callback(t(lang, 'btn_cancel'), 'cancel')]);
-      await ctx.reply(t(lang, 'buy_pick'), Markup.inlineKeyboard(rows));
-      return;
+      return ctx.reply(t(lang, 'buy_pick'), Markup.inlineKeyboard(rows));
+    }
+
+    if (text === t(lang, 'btn_send_receipt')) {
+      const u = await findUser(ctx.from.id);
+      if (!u) return ctx.reply(t(lang, 'acc_not_registered'), studentMenu(lang, s.isAdmin));
+      const o = await pool.query(
+        `SELECT 1 FROM payment_orders WHERE user_id=$1 AND status='pending' LIMIT 1`,
+        [u.id]
+      );
+      if (!o.rows[0]) return ctx.reply(t(lang, 'no_pending_order'), studentMenu(lang, s.isAdmin));
+      return ctx.reply(t(lang, 'buy_receipt_prompt'), cancelKb(lang));
     }
 
     if (text === t(lang, 'btn_sessions')) {
       const u = await findUser(ctx.from.id);
-      if (!u) {
-        await ctx.reply(t(lang, 'acc_not_registered'), menuKb(lang));
-        return;
-      }
+      if (!u) return ctx.reply(t(lang, 'acc_not_registered'), studentMenu(lang, s.isAdmin));
       const r = await pool.query(
         `SELECT scheduled_at, status FROM bookings
-          WHERE user_id = $1 AND scheduled_at > NOW()
+          WHERE user_id=$1 AND scheduled_at > NOW()
           ORDER BY scheduled_at LIMIT 10`,
         [u.id]
       );
-      if (!r.rows.length) {
-        await ctx.reply(t(lang, 'sessions_empty'), menuKb(lang));
-        return;
-      }
+      if (!r.rows.length) return ctx.reply(t(lang, 'sessions_empty'), studentMenu(lang, s.isAdmin));
       const lines = r.rows.map(
         (b, i) =>
-          `${i + 1}. ${new Date(b.scheduled_at).toISOString().slice(0, 16).replace('T', ' ')} — ${b.status}`
+          `${i + 1}. ${new Date(b.scheduled_at)
+            .toISOString()
+            .slice(0, 16)
+            .replace('T', ' ')} — ${b.status}`
       );
-      await ctx.reply(`${t(lang, 'sessions_next')}\n\n${lines.join('\n')}`, {
+      return ctx.reply(`${t(lang, 'sessions_next')}\n\n${lines.join('\n')}`, {
         parse_mode: 'Markdown',
-        ...menuKb(lang),
+        ...studentMenu(lang, s.isAdmin),
       });
-      return;
     }
 
     if (text === t(lang, 'btn_library')) {
       const r = await pool.query(
-        'SELECT title, url FROM library_items WHERE is_active = TRUE ORDER BY created_at DESC LIMIT 10'
+        `SELECT title, url FROM library_items
+          WHERE is_active=TRUE ORDER BY created_at DESC LIMIT 10`
       );
-      if (!r.rows.length) {
-        await ctx.reply(t(lang, 'lib_empty'), menuKb(lang));
-        return;
-      }
-      const lines = r.rows.map((it, i) => `${i + 1}. [${it.title}](${it.url || '#'})`);
-      await ctx.reply(`${t(lang, 'lib_title')}\n\n${lines.join('\n')}`, {
+      if (!r.rows.length) return ctx.reply(t(lang, 'lib_empty'), studentMenu(lang, s.isAdmin));
+      const lines = r.rows.map((it, i) => `${i + 1}. ${it.title}${it.url ? ' — ' + it.url : ''}`);
+      return ctx.reply(`${t(lang, 'lib_title')}\n\n${lines.join('\n')}`, {
         parse_mode: 'Markdown',
-        ...menuKb(lang),
+        ...studentMenu(lang, s.isAdmin),
       });
-      return;
     }
 
     if (text === t(lang, 'btn_support')) {
-      await ctx.reply(t(lang, 'support_msg'), { parse_mode: 'Markdown', ...menuKb(lang) });
-      return;
+      s.step = 'support';
+      return ctx.reply(t(lang, 'support_msg'), { parse_mode: 'Markdown', ...cancelKb(lang) });
     }
 
     if (text === t(lang, 'btn_lang')) {
-      await ctx.reply(t(lang, 'pick_lang'), langKb());
-      return;
+      return ctx.reply(t(lang, 'pick_lang'), langKb());
     }
 
-    // نص غير معروف أثناء خطوة → استخدامه كإدخال
-    await ctx.reply(t(lang, 'unknown'), menuKb(lang));
+    return ctx.reply(t(lang, 'unknown'), studentMenu(lang, s.isAdmin));
   });
 
   bot.catch((err, ctx) => {
