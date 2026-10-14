@@ -10,7 +10,7 @@ const ar = {
   menu: '🏠 القائمة الرئيسية',
   admin_menu: '🛠️ لوحة الإدارة',
 
-  btn_register: '📝 التسجيل',
+  btn_register: '📝 التسجيل', 
   btn_account: '👤 حسابي',
   btn_buy: '🛒 شراء الدقائق',
   btn_send_receipt: '🧾 إرسال الإيصال',
