@@ -1,0 +1,26 @@
+{
+  "name": "meqraah-imam-al-jezery",
+  "version": "1.0.0",
+  "description": "مقرأة الإمام الجزري للإقراء والإجازة بالسند — موقع + بوت تلغرام",
+  "main": "src/app.js",
+  "type": "commonjs",
+  "private": true,
+  "scripts": {
+    "start": "node src/app.js",
+    "create-admin": "node scripts/create-admin.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "argon2": "^0.41.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.12.0",
+    "telegraf": "^4.16.3"
+  }
+}
