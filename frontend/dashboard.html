@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>دخول / تسجيل | Login / Register</title>
+  <link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body>
+  <header class="navbar">
+    <a class="brand" href="index.html">
+      <span class="logo">🕌</span>
+      <span data-i18n="site_name">مقرأة الإمام الجزري</span>
+    </a>
+    <div class="nav-actions">
+      <div class="lang-switcher" id="langSwitcher"></div>
+    </div>
+  </header>
+
+  <main class="container" style="max-width: 520px">
+    <div class="tabs">
+      <button id="tabLogin" class="active" data-i18n="login_title">دخول الحساب</button>
+      <button id="tabRegister" data-i18n="register_title">تسجيل طالب جديد</button>
+    </div>
+
+    <div id="notice" class="notice hidden"></div>
+
+    <!-- ============ Login ============ -->
+    <form class="card" id="loginForm">
+      <h2 data-i18n="login_title">دخول الحساب</h2>
+      <div class="field">
+        <label data-i18n="field_email">البريد الإلكتروني</label>
+        <input type="email" name="email" required autocomplete="email" />
+      </div>
+      <div class="field">
+        <label data-i18n="field_password">كلمة المرور</label>
+        <input type="password" name="password" required autocomplete="current-password" />
+      </div>
+      <button class="btn" type="submit" data-i18n="btn_login">دخول</button>
+    </form>
+
+    <!-- ============ Register ============ -->
+    <form class="card" id="registerForm" style="display: none">
+      <h2 data-i18n="register_title">تسجيل طالب جديد</h2>
+      <div class="field">
+        <label data-i18n="field_full_name">الاسم الكامل</label>
+        <input type="text" name="full_name" required />
+      </div>
+      <div class="field">
+        <label data-i18n="field_email">البريد الإلكتروني</label>
+        <input type="email" name="email" required />
+      </div>
+      <div class="field">
+        <label data-i18n="field_phone">رقم الهاتف</label>
+        <input type="tel" name="phone" />
+      </div>
+      <div class="field">
+        <label data-i18n="field_password">كلمة المرور (8+ أحرف)</label>
+        <input type="password" name="password" required minlength="8" />
+      </div>
+      <div class="field">
+        <label data-i18n="field_language">اللغة</label>
+        <select name="language" id="regLang">
+          <option value="ar">🇸🇦 العربية</option>
+          <option value="en">🇬🇧 English</option>
+          <option value="am">🇪🇹 አማርኛ</option>
+        </select>
+      </div>
+      <button class="btn" type="submit" data-i18n="btn_register">تسجيل</button>
+    </form>
+  </main>
+
+  <footer class="footer">
+    <div data-i18n="site_name">مقرأة الإمام الجزري</div>
+  </footer>
+
+  <script type="module">
+    import { initI18n, buildLangSwitcher, t, currentLang, applyTranslations } from './assets/i18n.js';
+    import { api, setSession } from './assets/api.js';
+
+    initI18n();
+    buildLangSwitcher(document.getElementById('langSwitcher'));
+    document.getElementById('regLang').value = currentLang();
+
+    const tabLogin = document.getElementById('tabLogin');
+    const tabRegister = document.getElementById('tabRegister');
+    const loginForm = document.getElementById('loginForm');
+    const registerForm = document.getElementById('registerForm');
+    const notice = document.getElementById('notice');
+
+    function showNotice(msg, kind = 'info') {
+      notice.className = `notice ${kind}`;
+      notice.textContent = msg;
+    }
+    function hideNotice() {
+      notice.className = 'notice hidden';
+    }
+
+    function switchTab(which) {
+      hideNotice();
+      if (which === 'register') {
+        tabRegister.classList.add('active');
+        tabLogin.classList.remove('active');
+        registerForm.style.display = '';
+        loginForm.style.display = 'none';
+        history.replaceState(null, '', '#register');
+      } else {
+        tabLogin.classList.add('active');
+        tabRegister.classList.remove('active');
+        loginForm.style.display = '';
+        registerForm.style.display = 'none';
+        history.replaceState(null, '', '#login');
+      }
+    }
+
+    tabLogin.addEventListener('click', () => switchTab('login'));
+    tabRegister.addEventListener('click', () => switchTab('register'));
+    if (location.hash === '#register') switchTab('register');
+
+    loginForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      hideNotice();
+      const fd = new FormData(loginForm);
+      try {
+        const r = await api.login({
+          email: fd.get('email').trim(),
+          password: fd.get('password'),
+        });
+        setSession(r.user, r.token);
+        location.href = ['admin', 'teacher'].includes(r.user.role)
+          ? 'admin.html'
+          : 'dashboard.html';
+      } catch (err) {
+        showNotice(
+          err.status === 401 ? 'البريد أو كلمة المرور غير صحيحة' : t('msg_error'),
+          'error'
+        );
+      }
+    });
+
+    registerForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      hideNotice();
+      const fd = new FormData(registerForm);
+      try {
+        const r = await api.register({
+          full_name: fd.get('full_name').trim(),
+          email: fd.get('email').trim(),
+          phone: (fd.get('phone') || '').trim() || undefined,
+          password: fd.get('password'),
+          language: fd.get('language'),
+        });
+        setSession(r.user, r.token);
+        location.href = 'dashboard.html';
+      } catch (err) {
+        if (err.status === 409) {
+          showNotice('البريد مسجل مسبقاً', 'error');
+        } else if (err.status === 400) {
+          showNotice('تحقق من المدخلات (كلمة المرور 8+ أحرف)', 'error');
+        } else {
+          showNotice(t('msg_error'), 'error');
+        }
+      }
+    });
+
+    window.addEventListener('lang:change', applyTranslations);
+  </script>
+</body>
+</html>
