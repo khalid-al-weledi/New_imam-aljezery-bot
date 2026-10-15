@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>مقرأة الإمام الجزري | Imam Al-Jazari Maqra'ah</title>
+  <link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body>
+  <header class="navbar">
+    <a class="brand" href="index.html">
+      <span class="logo">🕌</span>
+      <span data-i18n="site_name">مقرأة الإمام الجزري</span>
+    </a>
+    <div class="nav-actions">
+      <div class="lang-switcher" id="langSwitcher"></div>
+      <a class="btn ghost" href="login.html" data-i18n="nav_login">دخول</a>
+      <a class="btn" href="login.html#register" data-i18n="nav_register">تسجيل</a>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <h1 data-i18n="hero_title">مقرأة الإمام الجزري للإقراء والإجازة بالسند</h1>
+      <p data-i18n="hero_sub">
+        منصة قرآنية متكاملة لإدارة التسجيل والجلسات والإجازات بالسند.
+      </p>
+      <p style="color: var(--gold); margin-bottom: 20px" data-i18n="supervisor">
+        الشيخ المشرف: المقرئ أبو زيد خالد أحمد الإثيوبي
+      </p>
+      <div class="cta">
+        <a class="btn" href="login.html#register" data-i18n="hero_cta_student">ابدأ التسجيل</a>
+        <a class="btn ghost" href="login.html" data-i18n="hero_cta_login">دخول الحساب</a>
+      </div>
+    </section>
+
+    <h2 style="text-align:center; color: var(--gold)" data-i18n="features_title">ماذا نقدّم؟</h2>
+    <section class="grid">
+      <div class="card">
+        <h3 data-i18n="f_talqeen">التلقين</h3>
+        <p data-i18n="f_talqeen_d">تصحيح التلاوة والتلقين من البداية.</p>
+      </div>
+      <div class="card">
+        <h3 data-i18n="f_hifz">الحفظ</h3>
+        <p data-i18n="f_hifz_d">برامج حفظ القرآن الكريم مع المتابعة.</p>
+      </div>
+      <div class="card">
+        <h3 data-i18n="f_ijaza">الإجازة (حفص عن عاصم)</h3>
+        <p data-i18n="f_ijaza_d">إجازة بالسند برواية حفص عن عاصم.</p>
+      </div>
+      <div class="card">
+        <h3 data-i18n="f_qiraat">القراءات السبع</h3>
+        <p data-i18n="f_qiraat_d">دراسة القراءات السبع على منهج أهل الأداء.</p>
+      </div>
+    </section>
+
+    <section class="grid" style="margin-top: 30px">
+      <div class="card">
+        <h2 data-i18n="contact_title">التواصل</h2>
+        <div class="contact-list">
+          <div>📧 <a href="mailto:khdahd241@gmail.com">khdahd241@gmail.com</a></div>
+          <div>📱 <a href="https://t.me/aljezer_241">@aljezer_241</a></div>
+          <div>🤖 <a href="https://t.me/meqraa_imamaljezery_bot">@meqraa_imamaljezery_bot</a></div>
+          <div>📞 Telebirr: +251 99 016 1372</div>
+          <div>📞 M-Pesa: +251 72 100 9122</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 data-i18n="verify_title">تحقق من سند</h2>
+        <div class="field">
+          <input id="serialInput" data-i18n-placeholder="verify_placeholder" placeholder="أدخل رقم السند (مثال: IJZ-XXXX)" />
+        </div>
+        <button class="btn gold" id="verifyBtn" data-i18n="verify_btn">تحقق</button>
+        <div id="verifyResult" style="margin-top: 14px; font-size: 14px"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div data-i18n="site_name">مقرأة الإمام الجزري</div>
+    <div>© <span id="year"></span> — جميع الحقوق محفوظة</div>
+  </footer>
+
+  <script type="module">
+    import { initI18n, buildLangSwitcher, t } from './assets/i18n.js';
+    import { api } from './assets/api.js';
+
+    initI18n();
+    buildLangSwitcher(document.getElementById('langSwitcher'));
+    document.getElementById('year').textContent = new Date().getFullYear();
+
+    const input = document.getElementById('serialInput');
+    const btn = document.getElementById('verifyBtn');
+    const out = document.getElementById('verifyResult');
+
+    btn.addEventListener('click', async () => {
+      const serial = input.value.trim().toUpperCase();
+      if (!serial) return;
+      out.innerHTML = t('msg_loading');
+      try {
+        const r = await api.verifySanad(serial);
+        if (r.valid) {
+          const d = r.data;
+          out.innerHTML = `
+            <div class="notice info">
+              <strong>${t('verify_valid')}</strong><br/>
+              ${t('verify_holder')}: ${d.holder_name || '—'}<br/>
+              ${d.teacher_name ? `${t('verify_teacher')}: ${d.teacher_name}<br/>` : ''}
+              ${t('verify_issued')}: ${new Date(d.issued_at).toLocaleDateString()}
+            </div>`;
+        } else {
+          out.innerHTML = `<div class="notice error">${t('verify_invalid')}</div>`;
+        }
+      } catch {
+        out.innerHTML = `<div class="notice error">${t('verify_invalid')}</div>`;
+      }
+    });
+  </script>
+</body>
+</html>
