@@ -1,12 +1,10 @@
-require('dotenv').config();
-const { Pool } = require('pg');
-
-const DATABASE_URL = process.env.DATABASE_URL || '';
-const useSSL = DATABASE_URL.includes('sslmode=require');
+const RAW_DATABASE_URL = process.env.DATABASE_URL || '';
+// احذف sslmode من الرابط (نمرر ssl عبر كائن الإعدادات بدلاً منه)
+const DATABASE_URL = RAW_DATABASE_URL.replace(/[?&]sslmode=[^&]*/g, '');
 
 const pool = new Pool({
   connectionString: DATABASE_URL,
-  ssl: useSSL ? { rejectUnauthorized: false } : false,
+  ssl: { rejectUnauthorized: false },
   max: 10,
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 15_000,
