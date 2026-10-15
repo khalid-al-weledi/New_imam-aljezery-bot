@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>لوحة الإدارة | Admin Panel</title>
+  <link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body>
+  <header class="navbar">
+    <a class="brand" href="index.html">
+      <span class="logo">🕌</span>
+      <span data-i18n="site_name">مقرأة الإمام الجزري</span>
+    </a>
+    <div class="nav-actions">
+      <div class="lang-switcher" id="langSwitcher"></div>
+      <a class="btn ghost" href="dashboard.html" data-i18n="nav_dashboard">لوحتي</a>
+      <button class="btn danger" id="logoutBtn" data-i18n="nav_logout">خروج</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <h1 style="color: var(--gold)" data-i18n="admin_title">لوحة الإدارة</h1>
+    <div id="notice" class="notice hidden"></div>
+
+    <div class="tabs" id="adminTabs">
+      <button class="active" data-tab="stats" data-i18n="admin_stats">إحصائيات</button>
+      <button data-tab="receipts" data-i18n="admin_receipts">الإيصالات المعلقة</button>
+      <button data-tab="students" data-i18n="admin_students">الطلاب</button>
+      <button data-tab="ijaza" data-i18n="admin_ijaza">إصدار إجازة</button>
+      <button data-tab="library" data-i18n="admin_library">المكتبة</button>
+      <button data-tab="tickets" data-i18n="admin_tickets">تذاكر الدعم</button>
+      <button data-tab="broadcast" data-i18n="admin_broadcast">إشعار جماعي</button>
+      <button data-tab="audit" data-i18n="admin_audit">سجل التدقيق</button>
+    </div>
+
+    <section class="tab-content" id="tab-stats">
+      <div class="grid" id="statsGrid"></div>
+    </section>
+
+    <section class="tab-content" id="tab-receipts" style="display: none">
+      <div class="grid" id="receiptsGrid"></div>
+    </section>
+
+    <section class="tab-content" id="tab-students" style="display: none">
+      <div class="card">
+        <h2 data-i18n="admin_students">الطلاب</h2>
+        <table class="table">
+          <thead>
+            <tr>
+              <th data-i18n="lbl_name">الاسم</th>
+              <th data-i18n="lbl_minutes">الدقائق</th>
+              <th data-i18n="lbl_actions">إجراءات</th>
+            </tr>
+          </thead>
+          <tbody id="studentsTable"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="tab-content" id="tab-ijaza" style="display: none">
+      <div class="card">
+        <h2 data-i18n="admin_ijaza">إصدار إجازة بالسند</h2>
+        <div class="field"><label>Student No</label><input id="ijStudent" /></div>
+        <div class="field"><label>Program ID</label><input id="ijProgram" placeholder="1" /></div>
+        <div class="field"><label>Sheikh / Mujiz</label><input id="ijTeacher" /></div>
+        <div class="field"><label>Sanad text</label><textarea id="ijSanad" rows="3"></textarea></div>
+        <button class="btn gold" id="issueIjaza" data-i18n="btn_issue">إصدار</button>
+      </div>
+    </section>
+
+    <section class="tab-content" id="tab-library" style="display: none">
+      <div class="card">
+        <h2 data-i18n="admin_library">إضافة عنصر للمكتبة</h2>
+        <div class="field"><label>Title</label><input id="libTitle" /></div>
+        <div class="field"><label>Type</label><input id="libType" placeholder="pdf / audio / video" /></div>
+        <div class="field"><label>URL</label><input id="libUrl" /></div>
+        <div class="field"><label>Description</label><textarea id="libDesc" rows="2"></textarea></div>
+        <button class="btn" id="addLibBtn" data-i18n="btn_add">إضافة</button>
+      </div>
+      <div class="card" style="margin-top: 14px">
+        <div id="libList"></div>
+      </div>
+    </section>
+
+    <section class="tab-content" id="tab-tickets" style="display: none">
+      <div id="ticketsList"></div>
+    </section>
+
+    <section class="tab-content" id="tab-broadcast" style="display: none">
+      <div class="card">
+        <h2 data-i18n="admin_broadcast">إشعار جماعي</h2>
+        <div class="field"><label>Title</label><input id="bTitle" /></div>
+        <div class="field"><label>Body</label><textarea id="bBody" rows="3"></textarea></div>
+        <button class="btn" id="broadcastBtn" data-i18n="dash_send">إرسال</button>
+      </div>
+    </section>
+
+    <section class="tab-content" id="tab-audit" style="display: none">
+      <div class="card"><div id="auditList"></div></div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div data-i18n="site_name">مقرأة الإمام الجزري</div>
+  </footer>
+
+  <script type="module">
+    import { initI18n, buildLangSwitcher, t, pickName, applyTranslations } from './assets/i18n.js';
+    import { api, requireAdmin, clearSession } from './assets/api.js';
+
+    if (!requireAdmin()) throw new Error('forbidden');
+    initI18n();
+    buildLangSwitcher(document.getElementById('langSwitcher'));
+
+    const notice = document.getElementById('notice');
+    function showNotice(msg, kind = 'info') {
+      notice.className = `notice ${kind}`;
+      notice.textContent = msg;
+      setTimeout(() => { notice.className = 'notice hidden'; }, 4000);
+    }
+
+    document.getElementById('logoutBtn').addEventListener('click', () => {
+      clearSession();
+      location.href = 'index.html';
+    });
+
+    // ===== Tabs =====
+    const tabs = document.getElementById('adminTabs');
+    tabs.querySelectorAll('button').forEach((b) => {
+      b.addEventListener('click', () => {
+        tabs.querySelectorAll('button').forEach((x) => x.classList.remove('active'));
+        b.classList.add('active');
+        document.querySelectorAll('.tab-content').forEach((s) => (s.style.display = 'none'));
+        document.getElementById(`tab-${b.dataset.tab}`).style.display = '';
+        loadTab(b.dataset.tab);
+      });
+    });
+
+    async function loadTab(name) {
+      if (name === 'stats') return loadStats();
+      if (name === 'receipts') return loadReceipts();
+      if (name === 'students') return loadStudents();
+      if (name === 'library') return loadLibraryAdmin();
+      if (name === 'tickets') return loadTickets();
+      if (name === 'audit') return loadAudit();
+    }
+
+    // ===== Stats =====
+    async function loadStats() {
+      try {
+        const s = await api.adminStats();
+        document.getElementById('statsGrid').innerHTML = `
+          <div class="card"><h3>👥 Students</h3><div style="font-size:32px">${s.students}</div></div>
+          <div class="card"><h3>🧾 Pending</h3><div style="font-size:32px">${s.pending_receipts}</div></div>
+          <div class="card"><h3>📅 Upcoming</h3><div style="font-size:32px">${s.upcoming_sessions}</div></div>
+          <div class="card"><h3>🎓 Ijazat</h3><div style="font-size:32px">${s.ijazat}</div></div>
+          <div class="card"><h3>💰 Revenue</h3><div style="font-size:32px">${s.total_revenue_etb} ETB</div></div>
+        `;
+      } catch {}
+    }
+
+    // ===== Receipts =====
+    async function loadReceipts() {
+      try {
+        const r = await api.adminPendingReceipts();
+        const grid = document.getElementById('receiptsGrid');
+        if (!r.receipts.length) {
+          grid.innerHTML = `<div class="card">${t('msg_empty')}</div>`;
+          return;
+        }
+        grid.innerHTML = r.receipts.map((x) => `
+          <div class="card">
+            <h3>${x.full_name || '—'}</h3>
+            <div class="row"><span class="label">${t('lbl_amount')}</span><span class="value">${x.amount_etb} ETB</span></div>
+            <div class="row"><span class="label">${t('lbl_pack')}</span><span class="value">${pickName({ name_ar: x.pkg_ar, name_en: x.pkg_en })}</span></div>
+            ${x.file_url ? `<div class="row"><a href="${x.file_url}" target="_blank">📎 Receipt</a></div>` : ''}
+            <div style="display:flex; gap:8px; margin-top:10px">
+              <button class="btn" data-approve="${x.id}">${t('btn_approve')}</button>
+              <button class="btn danger" data-reject="${x.id}">${t('btn_reject')}</button>
+            </div>
+          </div>
+        `).join('');
+
+        grid.querySelectorAll('[data-approve]').forEach((b) =>
+          b.addEventListener('click', async () => {
+            try {
+              await api.adminApproveReceipt(b.dataset.approve);
+              showNotice(t('msg_saved'), 'info');
+              loadReceipts();
+            } catch (e) { showNotice(t('msg_error'), 'error'); }
+          }));
+        grid.querySelectorAll('[data-reject]').forEach((b) =>
+          b.addEventListener('click', async () => {
+            try {
+              await api.adminRejectReceipt(b.dataset.reject);
+              showNotice(t('msg_saved'), 'warn');
+              loadReceipts();
+            } catch { showNotice(t('msg_error'), 'error'); }
+          }));
+      } catch {}
+    }
+
+    // ===== Students =====
+    async function loadStudents() {
+      try {
+        const r = await api.adminStudents();
+        const tbody = document.getElementById('studentsTable');
+        tbody.innerHTML = r.students.map((s) => `
+          <tr>
+            <td>${s.full_name || '—'}<br/><small style="color:var(--muted)">${String(s.id).slice(0,8).toUpperCase()}</small></td>
+            <td>${s.balance_minutes}</td>
+            <td>
+              <button class="btn" data-add="${s.id}">+ دقائق</button>
+              <button class="btn ghost" data-deduct="${s.id}">- دقائق</button>
+              <button class="btn ghost" data-toggle="${s.id}">Toggle</button>
+            </td>
+          </tr>
+        `).join('');
+
+        tbody.querySelectorAll('[data-add]').forEach((b) =>
+          b.addEventListener('click', async () => {
+            const n = prompt('Minutes to add:');
+            if (!n) return;
+            try {
+              await api.adminAddMinutes(b.dataset.add, { minutes: parseInt(n, 10), reason: 'web' });
+              showNotice(t('msg_saved'), 'info');
+              loadStudents();
+            } catch { showNotice(t('msg_error'), 'error'); }
+          }));
+        tbody.querySelectorAll('[data-deduct]').forEach((b) =>
+          b.addEventListener('click', async () => {
+            const n = prompt('Minutes to deduct:');
+            if (!n) return;
+            try {
+              await api.adminDeductMinutes(b.dataset.deduct, { minutes: parseInt(n, 10), reason: 'web' });
+              showNotice(t('msg_saved'), 'info');
+              loadStudents();
+            } catch { showNotice(t('msg_error'), 'error'); }
+          }));
+        tbody.querySelectorAll('[data-toggle]').forEach((b) =>
+          b.addEventListener('click', async () => {
+            try { await api.adminToggleUser(b.dataset.toggle); loadStudents(); } catch {}
+          }));
+      } catch {}
+    }
+
+    // ===== Ijaza =====
+    document.getElementById('issueIjaza').addEventListener('click', async () => {
+      const student_no = document.getElementById('ijStudent').value.trim();
+      const program_id = parseInt(document.getElementById('ijProgram').value || '0', 10);
+      const teacher_name = document.getElementById('ijTeacher').value.trim();
+      const sanad_text = document.getElementById('ijSanad').value.trim();
+      if (!student_no || !teacher_name || !sanad_text) {
+        return showNotice(t('msg_error'), 'error');
+      }
+      // حوّل student_no إلى user_id
+      try {
+        const r = await api.adminStudents();
+        const target = r.students.find((s) =>
+          String(s.id).slice(0, 8).toUpperCase() === student_no.toUpperCase()
+        );
+        if (!target) return showNotice('Student not found', 'error');
+        await api.adminIssueIjaza({
+          user_id: target.id,
+          program_id: program_id || undefined,
+          teacher_name,
+          sanad_text,
+        });
+        showNotice(t('msg_saved'), 'info');
+      } catch { showNotice(t('msg_error'), 'error'); }
+    });
+
+    // ===== Library =====
+    document.getElementById('addLibBtn').addEventListener('click', async () => {
+      try {
+        await api.adminAddLibrary({
+          title: document.getElementById('libTitle').value.trim(),
+          type: document.getElementById('libType').value.trim(),
+          url: document.getElementById('libUrl').value.trim(),
+          description: document.getElementById('libDesc').value.trim(),
+        });
+        showNotice(t('msg_saved'), 'info');
+        document.getElementById('libTitle').value = '';
+        document.getElementById('libUrl').value = '';
+        loadLibraryAdmin();
+      } catch { showNotice(t('msg_error'), 'error'); }
+    });
+
+    async function loadLibraryAdmin() {
+      try {
+        const r = await api.library();
+        document.getElementById('libList').innerHTML = r.items.length
+          ? r.items.map((it) => `
+              <div class="row">
+                <span class="label">${it.title}</span>
+                <button class="btn danger" data-del="${it.id}">×</button>
+              </div>`).join('')
+          : t('msg_empty');
+        document.querySelectorAll('[data-del]').forEach((b) =>
+          b.addEventListener('click', async () => {
+            try { await api.adminDeleteLibrary(b.dataset.del); loadLibraryAdmin(); } catch {}
+          }));
+      } catch {}
+    }
+
+    // ===== Tickets =====
+    async function loadTickets() {
+      try {
+        const r = await api.adminTickets();
+        document.getElementById('ticketsList').innerHTML = r.tickets.length
+          ? r.tickets.map((x) => `
+              <div class="card">
+                <h3>${x.full_name || '—'}</h3>
+                <div class="row"><span class="label">${x.subject || '—'}</span><span class="badge">${t('status_' + x.status) || x.status}</span></div>
+                <button class="btn ghost" data-close="${x.id}">${t('btn_close')}</button>
+              </div>`).join('')
+          : t('msg_empty');
+        document.querySelectorAll('[data-close]').forEach((b) =>
+          b.addEventListener('click', async () => {
+            try { await api.adminCloseTicket(b.dataset.close); loadTickets(); } catch {}
+          }));
+      } catch {}
+    }
+
+    // ===== Broadcast =====
+    document.getElementById('broadcastBtn').addEventListener('click', async () => {
+      const title = document.getElementById('bTitle').value.trim();
+      const body = document.getElementById('bBody').value.trim();
+      if (!title) return showNotice(t('msg_error'), 'error');
+      try {
+        const r = await api.adminNotifyAll({ title, body });
+        showNotice(`✅ Sent to ${r.sent} users`, 'info');
+      } catch { showNotice(t('msg_error'), 'error'); }
+    });
+
+    // ===== Audit =====
+    async function loadAudit() {
+      try {
+        const r = await api.adminAudit(200);
+        document.getElementById('auditList').innerHTML = r.logs.length
+          ? r.logs.map((l) => `
+              <div class="row">
+                <span class="label">${new Date(l.created_at).toLocaleString()}</span>
+                <span class="value">${l.action}</span>
+                <small style="color:var(--muted)">${l.actor_name || '—'}</small>
+              </div>`).join('')
+          : t('msg_empty');
+      } catch {}
+    }
+
+    // ===== Init =====
+    loadStats();
+
+    window.addEventListener('lang:change', applyTranslations);
+  </script>
+</body>
+</html>
