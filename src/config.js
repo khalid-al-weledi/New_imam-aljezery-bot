@@ -2,7 +2,6 @@ require('dotenv').config();
 const { Pool } = require('pg');
 
 const RAW_DATABASE_URL = process.env.DATABASE_URL || '';
-// احذف sslmode من الرابط لتجنب تعارض شهادة SSL
 const DATABASE_URL = RAW_DATABASE_URL.replace(/[?&]sslmode=[^&]*/g, '');
 
 const pool = new Pool({
@@ -28,8 +27,16 @@ const config = {
   adminEmail: process.env.ADMIN_EMAIL || '',
   adminPassword: process.env.ADMIN_PASSWORD || '',
   adminFullName: process.env.ADMIN_FULL_NAME || 'Admin',
+  // ===== سياسات المقرأة (قابلة للتعديل لاحقاً من الإدارة) =====
+  minutePriceEtb: 5,
+  bulkDiscountPercent: 2,
+  bulkDiscountThreshold: 200,
+  welcomeBonusMinutes: 30,
 };
 
+// ============================================================
+// SCHEMA — كل الجداول + الحقول الجديدة
+// ============================================================
 const SCHEMA_SQL = `
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
@@ -205,19 +212,6 @@ CREATE TABLE IF NOT EXISTS support_messages (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS registration_applications (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
-  telegram_id BIGINT,
-  full_name TEXT NOT NULL,
-  phone TEXT,
-  program_id INTEGER REFERENCES programs(id),
-  language TEXT DEFAULT 'ar',
-  notes TEXT,
-  status TEXT NOT NULL DEFAULT 'pending',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
 CREATE TABLE IF NOT EXISTS announcements (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   title TEXT NOT NULL,
@@ -231,37 +225,232 @@ CREATE TABLE IF NOT EXISTS system_settings (
   value JSONB
 );
 
+-- ===== جدول طلبات التسجيل (الكامل) =====
+CREATE TABLE IF NOT EXISTS registration_applications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_number TEXT UNIQUE,
+  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  telegram_id BIGINT,
+  telegram_username TEXT,
+  full_name TEXT NOT NULL,
+  gender TEXT,
+  age INTEGER,
+  country TEXT,
+  region TEXT,
+  city TEXT,
+  phone TEXT,
+  guardian_name TEXT,
+  guardian_phone TEXT,
+  quran_level TEXT,
+  has_read_mushaf BOOLEAN,
+  memorized_amount TEXT,
+  has_ijaza BOOLEAN,
+  previous_school TEXT,
+  previous_teacher TEXT,
+  learning_duration TEXT,
+  certificates TEXT,
+  program_id INTEGER REFERENCES programs(id),
+  preferred_days TEXT,
+  preferred_period TEXT,
+  notes TEXT,
+  language TEXT DEFAULT 'ar',
+  status TEXT NOT NULL DEFAULT 'pending',
+  rejection_reason TEXT,
+  reviewed_by UUID REFERENCES users(id),
+  reviewed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ===== توسيع جدول التسجيل للحالات القديمة (idempotent) =====
+ALTER TABLE registration_applications ADD COLUMN IF NOT EXISTS order_number TEXT;
+ALTER TABLE registration_applications ADD COLUMN IF NOT EXISTS gender TEXT;
+ALTER TABLE registration_applications ADD COLUMN IF NOT EXISTS age INTEGER;
+ALTER TABLE registration_applications ADD COLUMN IF NOT EXISTS country TEXT;
+ALTER TABLE registration_applications ADD COLUMN IF NOT EXISTS region TEXT;
+ALTER TABLE registration_applications ADD COLUMN IF NOT EXISTS city TEXT;
+ALTER TABLE registration_applications ADD COLUMN IF NOT EXISTS guardian_name TEXT;
+ALTER TABLE registration_applications ADD COLUMN IF NOT EXISTS guardian_phone TEXT;
+ALTER TABLE registration_applications ADD COLUMN IF NOT EXISTS quran_level TEXT;
+ALTER TABLE registration_applications ADD COLUMN IF NOT EXISTS has_read_mushaf BOOLEAN;
+ALTER TABLE registration_applications ADD COLUMN IF NOT EXISTS memorized_amount TEXT;
+ALTER TABLE registration_applications ADD COLUMN IF NOT EXISTS has_ijaza BOOLEAN;
+ALTER TABLE registration_applications ADD COLUMN IF NOT EXISTS previous_school TEXT;
+ALTER TABLE registration_applications ADD COLUMN IF NOT EXISTS previous_teacher TEXT;
+ALTER TABLE registration_applications ADD COLUMN IF NOT EXISTS learning_duration TEXT;
+ALTER TABLE registration_applications ADD COLUMN IF NOT EXISTS certificates TEXT;
+ALTER TABLE registration_applications ADD COLUMN IF NOT EXISTS preferred_days TEXT;
+ALTER TABLE registration_applications ADD COLUMN IF NOT EXISTS preferred_period TEXT;
+ALTER TABLE registration_applications ADD COLUMN IF NOT EXISTS reviewed_by UUID;
+ALTER TABLE registration_applications ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+ALTER TABLE registration_applications ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+ALTER TABLE registration_applications ADD COLUMN IF NOT EXISTS order_number TEXT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reg_order_number ON registration_applications(order_number) WHERE order_number IS NOT NULL;
+
+-- ===== ربط المدرس ببرامجه وطلابه =====
+CREATE TABLE IF NOT EXISTS teacher_programs (
+  id SERIAL PRIMARY KEY,
+  teacher_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  program_id INTEGER NOT NULL REFERENCES programs(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(teacher_id, program_id)
+);
+
+CREATE TABLE IF NOT EXISTS teacher_students (
+  id SERIAL PRIMARY KEY,
+  teacher_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  student_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  program_id INTEGER REFERENCES programs(id),
+  assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(teacher_id, student_id, program_id)
+);
+
+-- ===== الفترات الدراسية =====
+CREATE TABLE IF NOT EXISTS study_periods (
+  id SERIAL PRIMARY KEY,
+  code TEXT UNIQUE NOT NULL,
+  name_ar TEXT NOT NULL,
+  name_en TEXT,
+  name_am TEXT,
+  start_time TIME NOT NULL,
+  end_time TIME NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+-- ===== المجموعات =====
+CREATE TABLE IF NOT EXISTS study_groups (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  program_id INTEGER REFERENCES programs(id),
+  period_id INTEGER REFERENCES study_periods(id),
+  teacher_id UUID REFERENCES users(id),
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ===== طلبات تغيير الفترة =====
+CREATE TABLE IF NOT EXISTS period_change_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  current_period_id INTEGER REFERENCES study_periods(id),
+  requested_period_id INTEGER NOT NULL REFERENCES study_periods(id),
+  reason TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  reviewed_by UUID REFERENCES users(id),
+  reviewed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ===== الاختبارات =====
+CREATE TABLE IF NOT EXISTS exams (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  program_id INTEGER REFERENCES programs(id),
+  teacher_id UUID REFERENCES users(id),
+  scheduled_at TIMESTAMPTZ NOT NULL,
+  scope TEXT,
+  status TEXT NOT NULL DEFAULT 'scheduled',
+  result TEXT,
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ===== الأسئلة الشائعة =====
+CREATE TABLE IF NOT EXISTS faq_items (
+  id SERIAL PRIMARY KEY,
+  question_ar TEXT NOT NULL,
+  answer_ar TEXT NOT NULL,
+  question_en TEXT,
+  answer_en TEXT,
+  question_am TEXT,
+  answer_am TEXT,
+  sort_order INTEGER DEFAULT 0,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+-- ===== وسائل الدفع (ديناميكية) =====
+CREATE TABLE IF NOT EXISTS payment_methods (
+  id SERIAL PRIMARY KEY,
+  code TEXT UNIQUE NOT NULL,
+  name_ar TEXT NOT NULL,
+  name_en TEXT,
+  account_number TEXT,
+  account_holder TEXT,
+  instructions TEXT,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  sort_order INTEGER DEFAULT 0
+);
+
 CREATE INDEX IF NOT EXISTS idx_users_telegram ON users(telegram_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_user ON wallet_ledger(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_bookings_user ON bookings(user_id, scheduled_at);
 CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_logs(actor_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_reg_status ON registration_applications(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_reading_sessions_user ON reading_sessions(user_id, created_at DESC);
 `;
 
+// ============================================================
+// SEED — البيانات الافتراضية
+// ============================================================
 const SEED_SQL = `
 INSERT INTO programs (code, name_ar, name_en, name_am, description)
 VALUES
   ('talqeen',      'التلقين',           'Talqeen',           'ተልቂን',        'تصحيح التلاوة والتلقين'),
   ('hifz',         'الحفظ',             'Hifz',              'ሒፍዝ',         'حفظ القرآن الكريم'),
-  ('ijaza_hafs',   'الإجازة (حفص عن عاصم)', 'Ijazah (Hafs ''an ''Asim)', 'ኢጃዛ (ሐፍስ አን ዐሲም)', 'الإجازة بالسند برواية حفص عن عاصم'),
-  ('qiraat_sabaa', 'القراءات السبع',    'Qiraat Sab''ah',    'ቂራኣት ሰብዐ',   'دراسة القراءات السبع')
+  ('ijaza_hafs',   'الإجازة (حفص عن عاصم)', 'Ijazah (Hafs an Asim)', 'ኢጃዛ (ሐፍስ አን ዐሲም)', 'الإجازة بالسند برواية حفص عن عاصم'),
+  ('qiraat_sabaa', 'القراءات السبع',    'Qiraat Sabah',      'ቂራኣት ሰብዐ',   'دراسة القراءات السبع')
 ON CONFLICT (code) DO NOTHING;
 
 INSERT INTO packages (name_ar, name_en, minutes, price_etb)
-SELECT 'حزمة 60 دقيقة',  '60 Minutes Pack',  60,  200
+SELECT 'حزمة 60 دقيقة',  '60 Minutes Pack',  60,  300
 WHERE NOT EXISTS (SELECT 1 FROM packages WHERE minutes = 60);
 
 INSERT INTO packages (name_ar, name_en, minutes, price_etb)
-SELECT 'حزمة 150 دقيقة', '150 Minutes Pack', 150, 450
-WHERE NOT EXISTS (SELECT 1 FROM packages WHERE minutes = 150);
+SELECT 'حزمة 120 دقيقة', '120 Minutes Pack', 120, 588
+WHERE NOT EXISTS (SELECT 1 FROM packages WHERE minutes = 120);
 
 INSERT INTO packages (name_ar, name_en, minutes, price_etb)
-SELECT 'حزمة 300 دقيقة', '300 Minutes Pack', 300, 850
-WHERE NOT EXISTS (SELECT 1 FROM packages WHERE minutes = 300);
+SELECT 'حزمة 240 دقيقة', '240 Minutes Pack', 240, 1176
+WHERE NOT EXISTS (SELECT 1 FROM packages WHERE minutes = 240);
+
+INSERT INTO study_periods (code, name_ar, name_en, name_am, start_time, end_time)
+VALUES
+  ('morning',   'الفترة الصباحية',  'Morning',  'ጥዋት',  '09:00', '12:30'),
+  ('afternoon', 'الفترة المسائية',  'Afternoon','ከሰዓት', '14:00', '15:30'),
+  ('evening',   'الفترة الليلية',   'Evening',  'ማታ',   '21:00', '23:00')
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO payment_methods (code, name_ar, name_en, account_number, account_holder, sort_order)
+VALUES
+  ('cbe',      'بنك التجاري الإثيوبي (CBE)', 'Commercial Bank of Ethiopia', '1000694735391', 'خالد أحمد مصطفى', 1),
+  ('abyssinia','بنك أبيسينيا',              'Bank of Abyssinia',           '226626646',     'خالد أحمد مصطفى', 2),
+  ('telebirr', 'تيليبر',                     'Telebirr',                    '0990161372',    'خالد أحمد مصطفى', 3),
+  ('mpesa',    'إم-بيسا',                    'M-Pesa',                      '0721009122',    'خالد أحمد مصطفى', 4)
+ON CONFLICT (code) DO NOTHING;
 
 INSERT INTO system_settings (key, value) VALUES
-  ('site_name', '{"ar":"مقرأة الإمام الجزري","en":"Imam Al-Jazari Maqra''ah","am":"የኢማም አል-ጀዛሪ መቅራአ"}'::jsonb),
-  ('contact',   '{"email":"khdahd241@gmail.com","telegram":"@aljezer_241","telegram_bot":"@meqraa_imamaljezery_bot","phone_telebirr":"+251990161372","phone_mpesa":"+251721009122"}'::jsonb)
+  ('site_name', '{"ar":"مقرأة الإمام الجزري","en":"Imam Al-Jazari Maqraah","am":"የኢማም አል-ጀዛሪ መቅራአ"}'::jsonb),
+  ('contact',   '{"email":"khdahd241@gmail.com","telegram":"@aljezer_241","telegram_bot":"@meqraa_imamaljezery_bot"}'::jsonb),
+  ('pricing',   '{"minute_price_etb":5,"bulk_discount_percent":2,"bulk_threshold_minutes":200,"welcome_bonus_minutes":30}'::jsonb)
 ON CONFLICT (key) DO NOTHING;
+
+INSERT INTO faq_items (question_ar, answer_ar, question_en, answer_en, question_am, answer_am, sort_order)
+VALUES
+  ('ما هي المقرأة؟',
+   'مقرأة الإمام الجزري للإقراء والإجازة بالسند، منصة قرآنية لتعليم التلاوة والحفظ والقراءات والإجازة بالسند.',
+   'What is the Maqraah?',
+   'Imam Al-Jazari Maqraah for Ijazah with Sanad, a Quranic platform for Tilawah, Hifz, Qiraat and Ijazah with Sanad.',
+   'መቅራአው ምንድን ነው?',
+   'የኢማም አል-ጀዛሪ መቅራአ — ለተጅዊድ፣ ሒፍዝ፣ ቂራኣት እና ኢጃዛ በሰነድ።',
+   1),
+  ('كيف أسجل؟',
+   'من القائمة الرئيسية اضغط «التسجيل في المقرأة»، وأجب على الأسئلة خطوة بخطوة.',
+   'How do I register?',
+   'From the main menu, tap "Registration" and answer step by step.',
+   'እንዴት እመዘገባለሁ?',
+   'ከዋና ማውጫ «ምዝገባ» ይጫኑ እና ደረጃ በደረጃ ይመልሱ።',
+   2)
+ON CONFLICT DO NOTHING;
 `;
 
 async function initDb() {
