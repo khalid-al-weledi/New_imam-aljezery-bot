@@ -1,5 +1,8 @@
+require('dotenv').config();
+const { Pool } = require('pg');
+
 const RAW_DATABASE_URL = process.env.DATABASE_URL || '';
-// احذف sslmode من الرابط (نمرر ssl عبر كائن الإعدادات بدلاً منه)
+// احذف sslmode من الرابط لتجنب تعارض شهادة SSL
 const DATABASE_URL = RAW_DATABASE_URL.replace(/[?&]sslmode=[^&]*/g, '');
 
 const pool = new Pool({
@@ -27,7 +30,6 @@ const config = {
   adminFullName: process.env.ADMIN_FULL_NAME || 'Admin',
 };
 
-// ملاحظة: المصطلحات الشرعية تُخزَّن بلفظها العربي دائماً
 const SCHEMA_SQL = `
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
@@ -235,7 +237,6 @@ CREATE INDEX IF NOT EXISTS idx_bookings_user ON bookings(user_id, scheduled_at);
 CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_logs(actor_id, created_at DESC);
 `;
 
-// البرامج الأربعة — أسماؤها الشرعية تبقى بلفظها العربي (Transliteration) في كل اللغات
 const SEED_SQL = `
 INSERT INTO programs (code, name_ar, name_en, name_am, description)
 VALUES
